@@ -1,0 +1,18 @@
+config:
+  target: "http://localhost:8000"
+  phases:
+    - duration: 120
+      arrivalRate: 100
+      rampTo: 1000
+      name: "Ramp up to 1000 RPS"
+  defaults:
+    headers:
+      Content-Type: "application/json"
+  http:
+    timeout: 10  # Set request timeout to 10 seconds
+
+scenarios:
+  - name: "Track DHL package"
+    flow:
+      - get:
+          url: "/track/DHL/TN12345678"

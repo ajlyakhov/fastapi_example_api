@@ -1,0 +1,191 @@
+service: trackapi-lambda
+
+provider:
+  name: aws
+  runtime: python3.13
+  region: eu-central-1
+  stage: default
+  memorySize: 1024
+  timeout: 60
+  httpApi:
+    cors: true
+  environment:
+    STAGE: ${self:provider.stage}
+    WEATHERBIT_API_KEY: ${env:WEATHERBIT_API_KEY, ''}
+    WEATHERBIT_API_URL: https://api.weatherbit.io/v2.0/current
+    EXT_API_EXPIRATION: 7200
+    TRACKING_TABLE: Tracking
+    REDIS_HOST: !GetAtt MyRedisCluster.RedisEndpoint.Address
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:GetItem
+        - dynamodb:Query
+        - dynamodb:Scan
+      Resource:
+        - "arn:aws:dynamodb:${self:provider.region}:*:table/Tracking"
+    - Effect: Allow
+      Action:
+        - logs:CreateLogGroup
+        - logs:CreateLogStream
+        - logs:PutLogEvents
+      Resource:
+        - "arn:aws:logs:${self:provider.region}:*:log-group:/aws/lambda/*"
+    - Effect: Allow
+      Action:
+        - ec2:CreateNetworkInterface
+        - ec2:DescribeNetworkInterfaces
+        - ec2:DeleteNetworkInterface
+        - ec2:AssignPrivateIpAddresses
+        - ec2:UnassignPrivateIpAddresses
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - ec2:AssociateAddress
+        - ec2:DisassociateAddress
+        - ec2:ReleaseAddress
+        - ec2:AllocateAddress
+        - ec2:DescribeAddresses
+      Resource: "*"
+
+  vpc:
+    securityGroupIds:
+      - !Ref LambdaSecurityGroup
+    subnetIds:
+      - subnet-049bae75658b314e9
+
+package:
+  patterns:
+    - '!node_modules/**'
+    - '!venv/**'
+    - '!.venv/**'
+    - '!.env*'
+    - '!.idea/**'
+    - '!.pytest_cache/**'
+    - 'app/**'
+
+functions:
+  app:
+    handler: app.main.handler
+    memorySize: 1024
+    timeout: 15
+    layers:
+      - !Ref PythonRequirementsLambdaLayer
+    events:
+      - httpApi:
+          path: /
+          method: ANY
+      - httpApi:
+          path: /{proxy+}
+          method: ANY
+
+resources:
+  Resources:
+    ### Security Group for Redis (Created First)
+    RedisSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: "Security group for Redis"
+        VpcId: vpc-0aa1e080ebd61ac52
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 6379
+            ToPort: 6379
+            CidrIp: 172.31.0.0/16  # Allow traffic from within the VPC
+
+    ### Security Group for Lambda (Created Separately)
+    LambdaSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: "Security group for Lambda function"
+        VpcId: vpc-0aa1e080ebd61ac52
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: 0.0.0.0/0
+        SecurityGroupEgress:
+          - IpProtocol: "-1"
+            CidrIp: "0.0.0.0/0"
+
+    ### DynamoDB Table (No Dependencies)
+    TrackingRecordsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Tracking
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: tracking_number
+            AttributeType: S
+          - AttributeName: carrier
+            AttributeType: S
+        KeySchema:
+          - AttributeName: tracking_number
+            KeyType: HASH
+          - AttributeName: carrier
+            KeyType: RANGE
+
+    ### CloudWatch Logging
+    TrackingLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: /aws/lambda/trackapi-lambda
+        RetentionInDays: 3
+
+    ### Redis Subnet Group (No Lambda Dependency)
+    MyRedisSubnetGroup:
+      Type: AWS::ElastiCache::SubnetGroup
+      Properties:
+        Description: "Subnet group for ElastiCache"
+        SubnetIds:
+          - subnet-0aeaa68f6ef059a16
+          - subnet-049bae75658b314e9
+
+    ### Redis Cluster (Depends on Redis Subnet Group)
+    MyRedisCluster:
+      Type: AWS::ElastiCache::CacheCluster
+      DependsOn: MyRedisSubnetGroup
+      Properties:
+        CacheNodeType: cache.t4g.micro
+        Engine: redis
+        NumCacheNodes: 1
+        VpcSecurityGroupIds:
+          - !Ref RedisSecurityGroup
+        CacheSubnetGroupName: !Ref MyRedisSubnetGroup
+
+    ### NAT Gateway (Allows Public Internet Access)
+    MyNATGateway:
+      Type: AWS::EC2::NatGateway
+      Properties:
+        AllocationId: eipalloc-06f6c6d8c1fa98945
+        SubnetId: subnet-0aeaa68f6ef059a16
+
+    MyPrivateRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: vpc-0aa1e080ebd61ac52
+
+    MyPrivateRoute:
+      Type: AWS::EC2::Route
+      Properties:
+        RouteTableId: !Ref MyPrivateRouteTable
+        DestinationCidrBlock: 0.0.0.0/0
+        NatGatewayId: !Ref MyNATGateway
+
+    MyPrivateSubnetRouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: subnet-049bae75658b314e9
+        RouteTableId: !Ref MyPrivateRouteTable
+
+custom:
+  dotenv:
+    path: .env.lambda
+  pythonRequirements:
+    platform: linux/amd64
+    dockerizePip: true
+    layer: true
+
+plugins:
+  - serverless-dotenv-plugin
+  - serverless-python-requirements

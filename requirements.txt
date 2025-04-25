@@ -1,0 +1,24 @@
+# FastAPI & libs
+fastapi==0.115.11
+pydantic==2.10.0
+pycountry==24.6.1
+redis==5.2.1
+pydantic_settings==2.2.1
+uvicorn==0.34.0
+dotenv==0.9.9
+
+# Local AWS
+localstack==4.2.0
+awscli-local==0.22.0
+boto3==1.37.5
+watchtower==3.4.0
+
+# Testing
+pytest==8.3.5
+httpx==0.28.1
+pytest-asyncio==0.25.3
+pytest-cov==6.0.0
+requests-mock==1.12.1
+
+# FastAPI in AWS Lambda
+mangum==0.19.0
