@@ -1,6 +1,6 @@
 # AWS Lambda Template API project
 
-**Stack**: FastAPI on AWS Lambda + DynamoDB + ElasiCache(Redis)
+**Stack**: FastAPI on AWS Lambda + DynamoDB + ElastiCache(Redis)
 
 **Target**: API with average complexity business logic, cloud-native solution
 
